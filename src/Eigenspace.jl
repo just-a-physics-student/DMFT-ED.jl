@@ -47,7 +47,7 @@ function Eigenspace(
     evals = Vector{FPT}(undef, length(basis.states))
     evecs = Vector{Vector{EVecType}}(undef, length(basis.states))
 
-    verbose && print("Generating Eigenspace:   0.0% done.")
+    # verbose && print("Generating Eigenspace:   0.0% done.")
     for el in basis.blocklist
         slice = _block_slice(el)
         Hi = calc_Hamiltonian(model, basis.states[slice]; FPT=FPT)
@@ -61,9 +61,9 @@ function Eigenspace(
                 round(100 * (el[1] + el[2]) / length(basis.states), digits=1),5," ",
             )
         )
-        verbose && print("\rGenerating Eigenspace: $(done)% done.")
+        # verbose && print("\rGenerating Eigenspace: $(done)% done.")
     end
-    verbose && println("\rEigenspace generated!                  ")
+    # verbose && println("\rEigenspace generated!                  ")
     E0 = minimum(evals)
 
     return Eigenspace{FPT}(evals .- E0, evecs, E0)
@@ -76,7 +76,7 @@ function Eigenspace_L(model::Model, basis::Basis)
     evecs = Vector{Vector{EVecType}}(undef, length(basis.states))
     issymmetric = eltype(model.tMatrix) === Float64 ? true : false
 
-    print("Generating Eigenspace:   0.0% done.")
+    # print("Generating Eigenspace:   0.0% done.")
     for el in basis.blocklist
         slice = _block_slice(el)
         Hi = calc_Hamiltonian(model, basis.states[slice])
@@ -97,9 +97,9 @@ function Eigenspace_L(model::Model, basis::Basis)
             evecs[first(slice)+i-1] = vectors[i]
         end
         done = lpad(round(100 * (el[1] + el[2]) / length(basis.states), digits=1), 5, " ")
-        print("\rGenerating Eigenspace: $(done)% done.")
+        # print("\rGenerating Eigenspace: $(done)% done.")
     end
-    println("\rEigenspace generated!                  ")
+    # println("\rEigenspace generated!                  ")
     E0 = minimum(evals)
 
     return evals, evecs, E0

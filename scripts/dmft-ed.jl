@@ -59,7 +59,6 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
         G0W    = GWeiss(νnGrid, μ, p)
         es     = Eigenspace(model, basis);
         isnothing(GImp_i_old) ? GImp_i_old = deepcopy(GImp_i) : copyto!(GImp_i_old, GImp_i)
-        println("     Calculating GImp")
         GImp_i, dens = calc_GF_1(basis, es, νnGrid, β, ϵ_cut=ϵ_cut, overlap=overlap)
         !isnothing(GImp_i_old) && (GImp_i = α .* GImp_i .+ (1-α) .* GImp_i_old)
         ΣImp_i = Σ_from_GImp(G0W, GImp_i)
@@ -68,12 +67,13 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
         GLoc_i = GLoc(ΣImp_i, μ, νnGrid, kG)
         p_old = deepcopy(p)
         fit_AIM_params!(p, GLoc_i, μ, νnGrid)
-        println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(p.ϵₖ)) / it = $i ======== ")
-        println("Solution using Lsq:    ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
-        println("                       Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
-        println(" -> sum(Vₖ²) = $(sum(p.Vₖ .^ 2)) // Z = $Z")
-
+        
         converged = (sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ))) < abs_conv
+        println(" iteration $i: $(sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ)))")
+        println("   ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
+        println("   Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
+        println("   --> sum(Vₖ²) = $(sum(p.Vₖ .^ 2)) // Z = $Z")
+
         if converged || i >= maxit
             GImp_i, dens = calc_GF_1(basis, es, νnGrid, β, ϵ_cut=ϵ_cut, overlap=overlap, with_density=true)
             Z = calc_Z(es, β)
@@ -88,11 +88,11 @@ end
 
 
 """
-    construct_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
+    pick_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
 
 Calculate a anderson parameters to start a DMFT calculation with. This might serve as a starting point when a new system is investigated.
 """
-function construct_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
+function pick_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
     ϵₖ = [iseven(NBathSites) || i != ceil(Int, NBathSites/2) ? (U/2)/(i-NBathSites/2-1/2) : 0 for i in 1:NBathSites]
     Vₖ = [1/(4*NBathSites) for i in 1:NBathSites]
     return AIMParams(ϵₖ, Vₖ)
@@ -100,7 +100,7 @@ end
 
 function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String;
     Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
-    p::AIMParams = construct_initial_anderson_parameters(U, NBathSites)
+    p::AIMParams = pick_initial_anderson_parameters(U, NBathSites)
     return DMFT_Loop(U, μ, β, p, KGridStr; Nk=Nk, Nν=Nν, α=α, abs_conv=abs_conv, ϵ_cut=ϵ_cut, maxit=maxit)
 end
 
@@ -171,48 +171,66 @@ function write_result(filepath::String,
 end
 
 
-# command line
-length(ARGS) < 8 && error("Please proivide U/beta/mu/NBathSites/KGridStr/Path as arguments to the script!")
-hubbard_u           = parse(Float64, ARGS[1])
-inverse_temperature = parse(Float64, ARGS[2])
-chemical_potential  = parse(Float64, ARGS[3])
-lattice_info        = ARGS[4]
-bz_points_per_dim   = parse(Int, ARGS[5])
-n_bath_sites        = parse(Int, ARGS[6])
-out_dir             = ARGS[7]
-scan_mode           = ScanMode(parse(Int, ARGS[8]))
-
 # dev
 n_frequencies::Int  = 3000
 max_iterations::Int = 10
 convergence_paramater::Float64 = 1e-9
 
-# ensure out-file does not exist yet
-out_file_path = joinpath(out_dir, "dmft_u$(hubbard_u)_beta$(inverse_temperature)_bath$(n_bath_sites)_bz$(bz_points_per_dim)_scanmode$(Int(scan_mode)).jld2")
-if isfile(out_file_path)
-    throw(ArgumentError("File already exists: $(out_file_path)"))
+# command line
+length(ARGS) < 9 && error("Not enough arguments given!")
+scan_mode           = ScanMode(parse(Int, ARGS[1]))
+constant_param      = parse(Float64, ARGS[2]) # hubbard on-site interaction or temperature: depending on the scan-mode
+lower_bound         = parse(Float64, ARGS[3]) # hubbard on-site interaction or temperature: depending on the scan-mode
+upper_bound         = parse(Float64, ARGS[4]) # hubbard on-site interaction or temperature: depending on the scan-mode
+step_width          = parse(Float64, ARGS[5])
+lattice_info        = ARGS[6]
+bz_points_per_dim   = parse(Int, ARGS[7])
+n_bath_sites        = parse(Int, ARGS[8])
+out_dir             = ARGS[9]
+
+# define path in (U,T) plane
+scan_values = LinRange(lower_bound, upper_bound, Int(round((upper_bound - lower_bound) / step_width) + 1)) # ascending order
+hubbard_u_values = []
+inverse_temperature_values = []
+if scan_mode in [Fixed_U_increase_T, Fixed_U_decrease_T]
+    push!(hubbard_u_values, constant_param)
+    append!(inverse_temperature_values, scan_values)
+    if scan_mode == Fixed_U_increase_T
+        reverse!(inverse_temperature_values)
+    end
+elseif scan_mode in [Fixed_T_increase_U, Fixed_T_decrease_U]
+    push!(inverse_temperature_values, constant_param)
+    append!(hubbard_u_values, scan_values)
+    if scan_mode == Fixed_T_decrease_U
+        reverse!(hubbard_u_values)
+    end
 end
 
-# calculation
-initial_anderson_parameters::AIMParams = construct_initial_anderson_parameters(hubbard_u, n_bath_sites)
-anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
-    hubbard_u, chemical_potential, inverse_temperature,
-    initial_anderson_parameters, lattice_info, Nν=n_frequencies,
-    abs_conv=convergence_paramater, maxit=max_iterations)
+# function call via double loop so that the call statement appears exactly once
+anderson_parameters::AIMParams = pick_initial_anderson_parameters(first(hubbard_u_values), n_bath_sites)
+n_calc::Int = 1
+for hubbard_u in hubbard_u_values
+    chemical_potential::Float64  = hubbard_u / 2 # half filling
+    for inverse_temperature in inverse_temperature_values
+        # prepare result file
+        fname = "dmft_scanmode$(Int(scan_mode))_bath$(n_bath_sites)_u$(hubbard_u)_beta$(inverse_temperature)_bz$(bz_points_per_dim).jld2"
+        out_file_path = joinpath(out_dir, fname)
+        if isfile(out_file_path)
+            throw(ArgumentError("File already exists: $(out_file_path)"))
+        end
+        
+        # run calculation
+        global n_calc, anderson_parameters
+        println("Start DMFT calc $(n_calc): U = $(hubbard_u) , β = $(inverse_temperature)")
+        anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
+            hubbard_u, chemical_potential, inverse_temperature,
+            anderson_parameters, lattice_info, Nν=n_frequencies,
+            abs_conv=convergence_paramater, maxit=max_iterations)
+        
+        # write result
+        write_result(out_file_path, hubbard_u, inverse_temperature, chemical_potential, anderson_parameters, partition_sum, GF_imp.parent, Σ_imp.parent,
+            density, double_occupancy, E_min, n_bath_sites, lattice_info, converged, bz_points_per_dim, convergence_paramater, scan_mode)
 
-# write result
-write_result(out_file_path, hubbard_u, inverse_temperature, chemical_potential, anderson_parameters, partition_sum, GF_imp.parent, Σ_imp.parent,
-    density, double_occupancy, E_min, n_bath_sites, lattice_info, converged, bz_points_per_dim, convergence_paramater, scan_mode)
-
-write_hubb_andpar(chemical_potential, inverse_temperature, anderson_parameters, n_frequencies, n_bath_sites, max_iterations, convergence_paramater, out_dir)
-write_νFunction(νnGrid.parent, GF_imp.parent, joinpath(out_dir, "gm_wim"))  
-
-open(joinpath(out_dir, "zpart.dat"), "w") do f
-    write(f, "$partition_sum")
+        n_calc += 1
+    end
 end
-
-open(joinpath(out_dir, "densimp.dat"), "w") do f
-    write(f, "$density")
-end
-
-println("Next step: ensure that the output is sufficient for everything I need (Luttinger Ward functional) and its derivative!")
