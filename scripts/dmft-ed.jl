@@ -4,7 +4,7 @@ using jED
 
 using JLD2: jldopen
 
-# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 1.0 1.0 0.5 2Dsc-0.25 60 4 /home/jan/Desktop/rm_me_fork/ 1   
+# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 1.0 1.0 0.5 2Dsc-0.25 60 4 /home/jan/Desktop/rm_me_fork/ 1
 
 """
     DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String; 
@@ -15,6 +15,7 @@ Arguments:
     - U::Float64              : Hubbard U
     - μ::Float64              : chemical potential
     - β::Float64              : inverse temperature
+    - p::AIMParams            : initial anderson parameters
     - NBathSites::Int         : number of bath sites
     - KGridStr::String        : K-Grid String (see Dispersions.jl)
     - Nk::Int=60              : Number of K-Points for GLoc
@@ -31,12 +32,9 @@ Returns:
     - GImp    : Impurity Green's function
     - ΣImp    : Impurity self-energy
 """
-function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String; 
+function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr::String; 
                    Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
-    ϵₖ = [iseven(NBathSites) || i != ceil(Int, NBathSites/2) ? (U/2)/(i-NBathSites/2-1/2) : 0 for i in 1:NBathSites]
-    Vₖ = [1/(4*NBathSites) for i in 1:NBathSites]
-    p  = AIMParams(ϵₖ, Vₖ)
-    println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(ϵₖ)) / INIT ======== ")
+    println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(p.ϵₖ)) / INIT ======== ")
     println("Solution using Lsq:    ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
     println("                       Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
     GImp_i = nothing
@@ -48,7 +46,7 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridS
     i      = 1
 
     kG     = jED.gen_kGrid(KGridStr, Nk)
-    basis  = jED.Basis(length(Vₖ) + 1);
+    basis  = jED.Basis(length(p.Vₖ) + 1);
     overlap= Overlap(basis, create_op(basis, 1)) # optional
     νnGrid = jED.OffsetVector([1im * (2*n+1)*π/β for n in 0:Nν-1], 0:Nν-1)
 
@@ -70,7 +68,7 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridS
         GLoc_i = GLoc(ΣImp_i, μ, νnGrid, kG)
         p_old = deepcopy(p)
         fit_AIM_params!(p, GLoc_i, μ, νnGrid)
-        println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(ϵₖ)) / it = $i ======== ")
+        println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(p.ϵₖ)) / it = $i ======== ")
         println("Solution using Lsq:    ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
         println("                       Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
         println(" -> sum(Vₖ²) = $(sum(p.Vₖ .^ 2)) // Z = $Z")
@@ -86,6 +84,24 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridS
         i += 1
     end
     return p, GImp_i, ΣImp_i, Z, E_smallest, D, dens, converged, νnGrid
+end
+
+
+"""
+    construct_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
+
+Calculate a anderson parameters to start a DMFT calculation with. This might serve as a starting point when a new system is investigated.
+"""
+function construct_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
+    ϵₖ = [iseven(NBathSites) || i != ceil(Int, NBathSites/2) ? (U/2)/(i-NBathSites/2-1/2) : 0 for i in 1:NBathSites]
+    Vₖ = [1/(4*NBathSites) for i in 1:NBathSites]
+    return AIMParams(ϵₖ, Vₖ)
+end
+
+function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String;
+    Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
+    p::AIMParams = construct_initial_anderson_parameters(U, NBathSites)
+    return DMFT_Loop(U, μ, β, p, KGridStr; Nk=Nk, Nν=Nν, α=α, abs_conv=abs_conv, ϵ_cut=ϵ_cut, maxit=maxit)
 end
 
 
@@ -178,9 +194,10 @@ if isfile(out_file_path)
 end
 
 # calculation
+initial_anderson_parameters::AIMParams = construct_initial_anderson_parameters(hubbard_u, n_bath_sites)
 anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
     hubbard_u, chemical_potential, inverse_temperature,
-    n_bath_sites, lattice_info, Nν=n_frequencies,
+    initial_anderson_parameters, lattice_info, Nν=n_frequencies,
     abs_conv=convergence_paramater, maxit=max_iterations)
 
 # write result

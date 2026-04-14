@@ -2,7 +2,7 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__,".."))
 using jED
 
-# example call: julia scripts/fortran_compat.jl 1.0 1.0 0.5 4 3Dsc-0.20412414523193154 /home/julian/JuliansBastelecke/jED.jl
+# example call: rm /home/jan/Desktop/rm_me/* ; julia /home/jan/.julia/dev/DMFT-ED.jl/scripts/fortran_compat.jl 1.0 1.0 0.5 4 2Dsc-0.25 /home/jan/Desktop/rm_me
 
 length(ARGS) < 6 && error("Please proivide U/beta/mu/NBathSites/KGridStr/Path as arguments to the script!")
 U = parse(Float64, ARGS[1])
@@ -13,7 +13,7 @@ KGridStr   = ARGS[5]
 path       = ARGS[6]
 
 Nν::Int    = 3000 
-maxit::Int = 500
+maxit::Int = 10
 abs_conv::Float64 = 1e-9
 
 """
