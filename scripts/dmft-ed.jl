@@ -4,7 +4,7 @@ using jED
 
 using JLD2: jldopen
 
-# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 1.0 1.0 0.5 2Dsc-0.25 60 4 /home/jan/Desktop/rm_me_fork/ 1
+# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 4 1.0 1.0 2.0 1.0 2Dsc-0.25 60 4 /home/jan/Desktop/rm_me_fork/
 
 """
     DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String; 
@@ -170,6 +170,23 @@ function write_result(filepath::String,
     end
 end
 
+"""
+    read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParams
+
+Reads the anderson parameter from a given file and returns them. Throws an DomainError if the number of bath sites does not match the given number of bath sites.
+"""
+function read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParams
+    println("Load start parameters from file: $filepath")
+    dmft = jldopen(filepath, "r")
+        if dmft["n-bath-sites"] ≠ n_bath_sites
+            throw(DomainError(dmft["n-bath-sites"], "does not match the number of bath sites ($n_bath_sites) of the system!"))
+        end
+        ϵ_bath = dmft["bath-energy-levels"]
+        V_hyb  = dmft["hybridization-amplitudes"]
+    close(dmft)
+    return AIMParams(ϵ_bath, V_hyb)
+end
+
 
 # dev
 n_frequencies::Int  = 3000
@@ -187,6 +204,7 @@ lattice_info        = ARGS[6]
 bz_points_per_dim   = parse(Int, ARGS[7])
 n_bath_sites        = parse(Int, ARGS[8])
 out_dir             = ARGS[9]
+start_params_file   = (length(ARGS) == 10) ? ARGS[10] : ""
 
 # define path in (U,T) plane
 scan_values = LinRange(lower_bound, upper_bound, Int(round((upper_bound - lower_bound) / step_width) + 1)) # ascending order
@@ -206,8 +224,14 @@ elseif scan_mode in [Fixed_T_increase_U, Fixed_T_decrease_U]
     end
 end
 
+# select initial anderson parameters
+if isempty(start_params_file)
+    anderson_parameters::AIMParams = pick_initial_anderson_parameters(first(hubbard_u_values), n_bath_sites)
+else
+    anderson_parameters::AIMParams = read_anderson_parameters(start_params_file, n_bath_sites)
+end
+
 # function call via double loop so that the call statement appears exactly once
-anderson_parameters::AIMParams = pick_initial_anderson_parameters(first(hubbard_u_values), n_bath_sites)
 n_calc::Int = 1
 for hubbard_u in hubbard_u_values
     chemical_potential::Float64  = hubbard_u / 2 # half filling
@@ -222,7 +246,7 @@ for hubbard_u in hubbard_u_values
         # run calculation
         global n_calc, anderson_parameters
         println("Start DMFT calc $(n_calc): U = $(hubbard_u) , β = $(inverse_temperature)")
-        anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
+        @time anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
             hubbard_u, chemical_potential, inverse_temperature,
             anderson_parameters, lattice_info, Nν=n_frequencies,
             abs_conv=convergence_paramater, maxit=max_iterations)
