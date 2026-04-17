@@ -207,7 +207,11 @@ out_dir             = ARGS[9]
 start_params_file   = (length(ARGS) == 10) ? ARGS[10] : ""
 
 # define path in (U,T) plane
-scan_values = LinRange(lower_bound, upper_bound, Int(round((upper_bound - lower_bound) / step_width) + 1)) # ascending order
+if lower_bound == upper_bound # single calculation
+    scan_values = [lower_bound]
+else # multiple calculations
+    scan_values = LinRange(lower_bound, upper_bound, Int(round((upper_bound - lower_bound) / step_width) + 1)) # ascending order
+end
 hubbard_u_values = []
 inverse_temperature_values = []
 if scan_mode in [Fixed_U_increase_T, Fixed_U_decrease_T]
@@ -236,7 +240,7 @@ n_calc::Int = 1
 for hubbard_u in hubbard_u_values
     chemical_potential::Float64  = hubbard_u / 2 # half filling
     for inverse_temperature in inverse_temperature_values
-global n_calc, anderson_parameters
+        global n_calc, anderson_parameters
         # prepare result file
         fname = "dmft_calc_$(n_calc)_scanmode$(Int(scan_mode))_bath$(n_bath_sites)_u$(hubbard_u)_beta$(inverse_temperature)_bz$(bz_points_per_dim).jld2" # enumerate calculations to simplify restart feature
         out_file_path = joinpath(out_dir, fname)
@@ -245,7 +249,6 @@ global n_calc, anderson_parameters
         end
         
         # run calculation
-        global n_calc, anderson_parameters
         println("Start DMFT calc $(n_calc): U = $(hubbard_u) , β = $(inverse_temperature)")
         @time anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
             hubbard_u, chemical_potential, inverse_temperature,
