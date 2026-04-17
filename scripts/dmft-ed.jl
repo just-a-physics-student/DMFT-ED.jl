@@ -236,8 +236,9 @@ n_calc::Int = 1
 for hubbard_u in hubbard_u_values
     chemical_potential::Float64  = hubbard_u / 2 # half filling
     for inverse_temperature in inverse_temperature_values
+global n_calc, anderson_parameters
         # prepare result file
-        fname = "dmft_scanmode$(Int(scan_mode))_bath$(n_bath_sites)_u$(hubbard_u)_beta$(inverse_temperature)_bz$(bz_points_per_dim).jld2"
+        fname = "dmft_calc_$(n_calc)_scanmode$(Int(scan_mode))_bath$(n_bath_sites)_u$(hubbard_u)_beta$(inverse_temperature)_bz$(bz_points_per_dim).jld2" # enumerate calculations to simplify restart feature
         out_file_path = joinpath(out_dir, fname)
         if isfile(out_file_path)
             throw(ArgumentError("File already exists: $(out_file_path)"))
