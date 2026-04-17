@@ -189,9 +189,9 @@ end
 
 
 # dev
-n_frequencies::Int  = 3000
-max_iterations::Int = 10
-convergence_paramater::Float64 = 1e-9
+n_frequencies::Int  = 2500
+max_iterations::Int = 1000000
+convergence_paramater::Float64 = 1e-7
 
 # command line
 length(ARGS) < 9 && error("Not enough arguments given!")
