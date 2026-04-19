@@ -204,7 +204,8 @@ lattice_info        = ARGS[6]
 bz_points_per_dim   = parse(Int, ARGS[7])
 n_bath_sites        = parse(Int, ARGS[8])
 out_dir             = ARGS[9]
-start_params_file   = (length(ARGS) == 10) ? ARGS[10] : ""
+overwrite_existing  = (length(ARGS) >= 10) ? parse(Bool, ARGS[10]) : false
+start_params_file   = (length(ARGS) >= 11) ? ARGS[11] : ""
 
 # define path in (U,T) plane
 if lower_bound == upper_bound # single calculation
@@ -245,7 +246,12 @@ for hubbard_u in hubbard_u_values
         fname = "dmft_calc_$(n_calc)_scanmode$(Int(scan_mode))_bath$(n_bath_sites)_u$(hubbard_u)_beta$(inverse_temperature)_bz$(bz_points_per_dim).jld2" # enumerate calculations to simplify restart feature
         out_file_path = joinpath(out_dir, fname)
         if isfile(out_file_path)
-            throw(ArgumentError("File already exists: $(out_file_path)"))
+            println("Result file already exists: $(out_file_path)")
+            if !overwrite_existing
+                throw(ArgumentError("Stop here! In order to allow overwriting the existing result file, provide cmd argument 10!"))
+            end
+            println("Overwriting the result file was explicitly allowed! Resume calculation from last result.")
+            anderson_parameters = read_anderson_parameters(out_file_path, n_bath_sites)
         end
         
         # run calculation
