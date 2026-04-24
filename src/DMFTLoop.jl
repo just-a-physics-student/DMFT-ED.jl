@@ -167,3 +167,100 @@ function GLoc(ΣImp::MatsubaraF, μ::Float64, νnGrid::FermionicMatsubaraGrid, k
     return GLoc
 end
 
+"""
+    DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String; 
+              Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit = 20)
+
+Arguments:
+----------
+    - U::Float64              : Hubbard U
+    - μ::Float64              : chemical potential
+    - β::Float64              : inverse temperature
+    - p::AIMParams            : initial anderson parameters
+    - NBathSites::Int         : number of bath sites
+    - KGridStr::String        : K-Grid String (see Dispersions.jl)
+    - Nk::Int=60              : Number of K-Points for GLoc
+    - Nν::Int=1000            : Number of Matsubara frequencies
+    - α::Float64=0.7          : Mixing (1 -> no mixing)
+    - abs_conv::Float64=1e-8  : Absolute difference of Anderson parameters that if fallen short of leads to termination of the algorithm
+    - ϵ_cut::Float64=1e-12    : Terms smaller than this are not considered for the impurity Green's function
+    - maxit::Int=20           : Maximum number of DMFT iterations
+
+Returns:
+----------
+    - p       : Anderson parameters
+    - νnGrid  : Matsubara grid
+    - GImp    : Impurity Green's function
+    - ΣImp    : Impurity self-energy
+"""
+function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr::String; 
+                   Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
+    println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(p.ϵₖ)) / INIT ======== ")
+    println("Solution using Lsq:    ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
+    println("                       Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
+    GImp_i = nothing
+    GImp_i_old = nothing
+    ΣImp_i = nothing
+    dens   = Inf
+    Z      = Inf
+    done   = false
+    i      = 1
+
+    kG     = jED.gen_kGrid(KGridStr, Nk)
+    basis  = jED.Basis(length(p.Vₖ) + 1);
+    overlap= Overlap(basis, create_op(basis, 1)) # optional
+    νnGrid = jED.OffsetVector([1im * (2*n+1)*π/β for n in 0:Nν-1], 0:Nν-1)
+
+    converged::Bool = false
+    E_smallest::Float64 = Inf64
+    D::Float64 = Inf64
+        
+    while !done
+        model  = AIM(p.ϵₖ, p.Vₖ, μ, U)
+        G0W    = GWeiss(νnGrid, μ, p)
+        es     = Eigenspace(model, basis);
+        isnothing(GImp_i_old) ? GImp_i_old = deepcopy(GImp_i) : copyto!(GImp_i_old, GImp_i)
+        GImp_i, dens = calc_GF_1(basis, es, νnGrid, β, ϵ_cut=ϵ_cut, overlap=overlap)
+        !isnothing(GImp_i_old) && (GImp_i = α .* GImp_i .+ (1-α) .* GImp_i_old)
+        ΣImp_i = Σ_from_GImp(G0W, GImp_i)
+        Z = calc_Z(es, β)
+
+        GLoc_i = GLoc(ΣImp_i, μ, νnGrid, kG)
+        p_old = deepcopy(p)
+        fit_AIM_params!(p, GLoc_i, μ, νnGrid)
+        
+        converged = (sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ))) < abs_conv
+        println(" iteration $i: $(sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ)))")
+        println("   ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
+        println("   Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
+        println("   --> sum(Vₖ²) = $(sum(p.Vₖ .^ 2)) // Z = $Z")
+
+        if converged || i >= maxit
+            GImp_i, dens = calc_GF_1(basis, es, νnGrid, β, ϵ_cut=ϵ_cut, overlap=overlap, with_density=true)
+            Z = calc_Z(es, β)
+            E_smallest = es.E0
+            D = jED.calc_D(es, β, basis, model.impuritySiteIndex)
+            done = true
+        end
+        i += 1
+    end
+    return p, GImp_i, ΣImp_i, Z, E_smallest, D, dens, converged, νnGrid
+end
+
+
+"""
+    pick_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
+
+Calculate a anderson parameters to start a DMFT calculation with. This might serve as a starting point when a new system is investigated.
+"""
+function pick_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
+    ϵₖ = [iseven(NBathSites) || i != ceil(Int, NBathSites/2) ? (U/2)/(i-NBathSites/2-1/2) : 0 for i in 1:NBathSites]
+    Vₖ = [1/(4*NBathSites) for i in 1:NBathSites]
+    return AIMParams(ϵₖ, Vₖ)
+end
+
+function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String;
+    Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
+    p::AIMParams = pick_initial_anderson_parameters(U, NBathSites)
+    return DMFT_Loop(U, μ, β, p, KGridStr; Nk=Nk, Nν=Nν, α=α, abs_conv=abs_conv, ϵ_cut=ϵ_cut, maxit=maxit)
+end

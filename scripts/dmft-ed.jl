@@ -1,192 +1,68 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__,".."))
-using jED
+using jED: AIMParams, pick_initial_anderson_parameters, read_anderson_parameters, DMFT_Loop, write_result, ScanMode, Fixed_U_increase_T, Fixed_U_decrease_T, Fixed_T_increase_U, Fixed_T_decrease_U
 
 using JLD2: jldopen
 
-# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 4 1.0 1.0 2.0 1.0 2Dsc-0.25 60 4 /home/jan/Desktop/rm_me_fork/
+# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 4 1.0 1.0 2.0 1.0 "2Dsc-0.25" 60 4 /home/jan/Desktop/rm_me_fork/
+using ArgParse
 
-"""
-    DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String; 
-              Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit = 20)
+function parse_commandline()
+    s = ArgParseSettings()
 
-Arguments:
-----------
-    - U::Float64              : Hubbard U
-    - μ::Float64              : chemical potential
-    - β::Float64              : inverse temperature
-    - p::AIMParams            : initial anderson parameters
-    - NBathSites::Int         : number of bath sites
-    - KGridStr::String        : K-Grid String (see Dispersions.jl)
-    - Nk::Int=60              : Number of K-Points for GLoc
-    - Nν::Int=1000            : Number of Matsubara frequencies
-    - α::Float64=0.7          : Mixing (1 -> no mixing)
-    - abs_conv::Float64=1e-8  : Absolute difference of Anderson parameters that if fallen short of leads to termination of the algorithm
-    - ϵ_cut::Float64=1e-12    : Terms smaller than this are not considered for the impurity Green's function
-    - maxit::Int=20           : Maximum number of DMFT iterations
-
-Returns:
-----------
-    - p       : Anderson parameters
-    - νnGrid  : Matsubara grid
-    - GImp    : Impurity Green's function
-    - ΣImp    : Impurity self-energy
-"""
-function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr::String; 
-                   Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
-    println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(p.ϵₖ)) / INIT ======== ")
-    println("Solution using Lsq:    ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
-    println("                       Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
-    GImp_i = nothing
-    GImp_i_old = nothing
-    ΣImp_i = nothing
-    dens   = Inf
-    Z      = Inf
-    done   = false
-    i      = 1
-
-    kG     = jED.gen_kGrid(KGridStr, Nk)
-    basis  = jED.Basis(length(p.Vₖ) + 1);
-    overlap= Overlap(basis, create_op(basis, 1)) # optional
-    νnGrid = jED.OffsetVector([1im * (2*n+1)*π/β for n in 0:Nν-1], 0:Nν-1)
-
-    converged::Bool = false
-    E_smallest::Float64 = Inf64
-    D::Float64 = Inf64
-        
-    while !done
-        model  = AIM(p.ϵₖ, p.Vₖ, μ, U)
-        G0W    = GWeiss(νnGrid, μ, p)
-        es     = Eigenspace(model, basis);
-        isnothing(GImp_i_old) ? GImp_i_old = deepcopy(GImp_i) : copyto!(GImp_i_old, GImp_i)
-        GImp_i, dens = calc_GF_1(basis, es, νnGrid, β, ϵ_cut=ϵ_cut, overlap=overlap)
-        !isnothing(GImp_i_old) && (GImp_i = α .* GImp_i .+ (1-α) .* GImp_i_old)
-        ΣImp_i = Σ_from_GImp(G0W, GImp_i)
-        Z = calc_Z(es, β)
-
-        GLoc_i = GLoc(ΣImp_i, μ, νnGrid, kG)
-        p_old = deepcopy(p)
-        fit_AIM_params!(p, GLoc_i, μ, νnGrid)
-        
-        converged = (sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ))) < abs_conv
-        println(" iteration $i: $(sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ)))")
-        println("   ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
-        println("   Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
-        println("   --> sum(Vₖ²) = $(sum(p.Vₖ .^ 2)) // Z = $Z")
-
-        if converged || i >= maxit
-            GImp_i, dens = calc_GF_1(basis, es, νnGrid, β, ϵ_cut=ϵ_cut, overlap=overlap, with_density=true)
-            Z = calc_Z(es, β)
-            E_smallest = es.E0
-            D = jED.calc_D(es, β, basis, model.impuritySiteIndex)
-            done = true
-        end
-        i += 1
+    @add_arg_table s begin
+        "--start_params_file"
+            help = "Path to a file containing Anderson parameters to start the calculation from."
+            arg_type = String
+            default = ""
+        "--overwrite_existing"
+            help = "If given, existing result files will be overwritten."
+            action = :store_true
+        "scan_mode"
+            help = "See documentation of `ScanMode`. 1: Fixed U, increase temperature, 2: Fixed U, decrease temperature, 3: Fixed temperature, increase U, 4: Fixed temperature, decrease U"
+            arg_type = Int
+            required = true
+        "constant_param"
+            help = "Value of the fixed quantity (hubbard on-site interaction U or inverse temperature) depending on the argument `scan_mode`."
+            arg_type = Float64
+            required = true
+        "lower_bound"
+            help = "Lower bound for the variable quantity (hubbard on-site interaction U or inverse temperature) depending on the argument `scan_mode`."
+            arg_type = Float64
+            required = true
+        "upper_bound"
+            help = "Upper bound for the variable quantity (hubbard on-site interaction U or inverse temperature) depending on the argument `scan_mode`. Set to the same value as lower bound to enforce a single calculation."
+            arg_type = Float64
+            required = true
+        "step_width"
+            help = "Step width to be used between the lower and the upper bound for the variable quantity (hubbard on-site interaction U or inverse temperature) depending on the argument `scan_mode`."
+            arg_type = Float64
+            required = true
+        "lattice_info"
+            help = "High-level description of the lattice geometry. See documentation of the k-grid-string from `Dispersions.jl`."
+            arg_type = String
+            required = true
+        "bz_points_per_dim"
+            help = "Number of points per dimension to be used for sampling the first Brillouin zone."
+            arg_type = Int
+            required = true
+        "n_bath_sites"
+            help = "Number of bath sites in the Anderson Impurity model."
+            arg_type = Int
+            required = true
+        "out_dir"
+            help = "Path to an existing directory in which the result should be stored."
+            arg_type = String
+            required = true
     end
-    return p, GImp_i, ΣImp_i, Z, E_smallest, D, dens, converged, νnGrid
+    return parse_args(s)
 end
 
-
-"""
-    pick_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
-
-Calculate a anderson parameters to start a DMFT calculation with. This might serve as a starting point when a new system is investigated.
-"""
-function pick_initial_anderson_parameters(U::Float64, NBathSites::Int)::AIMParams
-    ϵₖ = [iseven(NBathSites) || i != ceil(Int, NBathSites/2) ? (U/2)/(i-NBathSites/2-1/2) : 0 for i in 1:NBathSites]
-    Vₖ = [1/(4*NBathSites) for i in 1:NBathSites]
-    return AIMParams(ϵₖ, Vₖ)
+parsed_args = parse_commandline()
+println("Parsed args:")
+for (arg,val) in parsed_args
+    println("  $arg  =>  $val")
 end
-
-function DMFT_Loop(U::Float64, μ::Float64, β::Float64, NBathSites::Int, KGridStr::String;
-    Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
-    p::AIMParams = pick_initial_anderson_parameters(U, NBathSites)
-    return DMFT_Loop(U, μ, β, p, KGridStr; Nk=Nk, Nν=Nν, α=α, abs_conv=abs_conv, ϵ_cut=ϵ_cut, maxit=maxit)
-end
-
-
-# ==================== IO Functions ====================
-function write_hubb_andpar(μ::Float64, β::Float64, p::AIMParams, Nν::Int, NBathSites::Int, maxit::Int, abs_conv::Float64, path::String)
-    fname = joinpath(path, "hubb.andpar")
-    epsk_str = ""
-    tpar_str = ""
-    for ek in p.ϵₖ
-        epsk_str = epsk_str * "$ek\n"
-    end
-    for vk in p.Vₖ
-        tpar_str = tpar_str * "$vk\n"
-    end
-    out_string = """           ========================================
-              HEADER PLACEHOLDER
-           ========================================
-NSITE     $NBathSites IWMAX $Nν
-    $(β)d0, -12.0, 12.0, 0.007
-c ns,imaxmu,deltamu, # iterations, conv.param.
-   $NBathSites, 0, 0.d0, $maxit, $abs_conv
-c ifix(0,1), <n>,   inew, iauto
-Eps(k)
-$epsk_str tpar(k)
-$tpar_str $μ
-"""
-    open(fname, "w") do f
-        write(f, out_string)
-    end
-end
-
-function write_νFunction(νnGrid::Vector{ComplexF64}, data::Vector{ComplexF64}, fname::String) 
-    row_fmt_str = "%27.16f %27.16f %27.16f"
-    row_fmt     = jED.Printf.Format(row_fmt_str * "\n")
-
-    open(fname,"w") do f
-        for i in 1:length(νnGrid)
-            jED.Printf.format(f, row_fmt, imag(νnGrid[i]), real(data[i]), imag(data[i]))
-        end
-    end
-end
-
-@enum ScanMode Fixed_U_increase_T=1 Fixed_U_decrease_T=2 Fixed_T_increase_U=3 Fixed_T_decrease_U=4
-
-function write_result(filepath::String, 
-    u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
-    dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64, scan_mode::ScanMode)
-    jldopen(filepath, "w") do file
-        file["hubbard-u"] = u
-        file["inverse-temperature"] = β
-        file["chemical-potential"] = μ
-        file["bath-energy-levels"] = p.ϵₖ
-        file["hybridization-amplitudes"] = p.Vₖ
-        file["partition-sum"] = partition_sum
-        file["GF-impurity"] = G_int
-        file["self-energy-impurity"] = Σ_imp
-        file["density"] = dens
-        file["double-occupation"] = double_occ
-        file["E-shift"] = E_min
-        file["n-bath-sites"] = NBathSites
-        file["lattice-info"] = KGridStr
-        file["bz-points-per-dim"] = Nk
-        file["convergence-parameter"] = conv_param
-        file["converged"] = converged
-        file["scan-mode"] = String(Symbol(scan_mode))
-    end
-end
-
-"""
-    read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParams
-
-Reads the anderson parameter from a given file and returns them. Throws an DomainError if the number of bath sites does not match the given number of bath sites.
-"""
-function read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParams
-    println("Load start parameters from file: $filepath")
-    dmft = jldopen(filepath, "r")
-        if dmft["n-bath-sites"] ≠ n_bath_sites
-            throw(DomainError(dmft["n-bath-sites"], "does not match the number of bath sites ($n_bath_sites) of the system!"))
-        end
-        ϵ_bath = dmft["bath-energy-levels"]
-        V_hyb  = dmft["hybridization-amplitudes"]
-    close(dmft)
-    return AIMParams(ϵ_bath, V_hyb)
-end
-
 
 # dev
 n_frequencies::Int  = 2500
@@ -194,18 +70,17 @@ max_iterations::Int = 1000000
 convergence_paramater::Float64 = 1e-7
 
 # command line
-length(ARGS) < 9 && error("Not enough arguments given!")
-scan_mode           = ScanMode(parse(Int, ARGS[1]))
-constant_param      = parse(Float64, ARGS[2]) # hubbard on-site interaction or temperature: depending on the scan-mode
-lower_bound         = parse(Float64, ARGS[3]) # hubbard on-site interaction or temperature: depending on the scan-mode
-upper_bound         = parse(Float64, ARGS[4]) # hubbard on-site interaction or temperature: depending on the scan-mode
-step_width          = parse(Float64, ARGS[5])
-lattice_info        = ARGS[6]
-bz_points_per_dim   = parse(Int, ARGS[7])
-n_bath_sites        = parse(Int, ARGS[8])
-out_dir             = ARGS[9]
-overwrite_existing  = (length(ARGS) >= 10) ? parse(Bool, ARGS[10]) : false
-start_params_file   = (length(ARGS) >= 11) ? ARGS[11] : ""
+scan_mode           ::ScanMode  = ScanMode(parsed_args["scan_mode"])
+constant_param      ::Float64   = parsed_args["constant_param"]
+lower_bound         ::Float64   = parsed_args["lower_bound"]
+upper_bound         ::Float64   = parsed_args["upper_bound"]
+step_width          ::Float64   = parsed_args["step_width"]
+lattice_info        ::String    = parsed_args["lattice_info"]
+bz_points_per_dim   ::Int       = parsed_args["bz_points_per_dim"]
+n_bath_sites        ::Int       = parsed_args["n_bath_sites"]
+out_dir             ::String    = parsed_args["out_dir"]
+overwrite_existing  ::Bool      = parsed_args["overwrite_existing"]
+start_params_file   ::String    = parsed_args["start_params_file"]
 
 # define path in (U,T) plane
 if lower_bound == upper_bound # single calculation
