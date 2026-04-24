@@ -194,7 +194,7 @@ Returns:
     - ΣImp    : Impurity self-energy
 """
 function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr::String; 
-                   Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20)
+                   Nk::Int=60, Nν::Int=1000, α::Float64=0.7, abs_conv::Float64=1e-8, ϵ_cut::Float64=1e-12, maxit::Int=20, checkpointfile::String="")
     println(" ======== U = $U / μ = $μ / β = $β / NB = $(length(p.ϵₖ)) / INIT ======== ")
     println("Solution using Lsq:    ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
     println("                       Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
@@ -214,7 +214,9 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
     converged::Bool = false
     E_smallest::Float64 = Inf64
     D::Float64 = Inf64
-        
+
+    checkpoint = !isempty(checkpointfile)
+    
     while !done
         model  = AIM(p.ϵₖ, p.Vₖ, μ, U)
         G0W    = GWeiss(νnGrid, μ, p)
@@ -241,6 +243,10 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
             E_smallest = es.E0
             D = jED.calc_D(es, β, basis, model.impuritySiteIndex)
             done = true
+        end
+        if checkpoint
+            println("write checkpoint file")
+            write_anderson_parameters(checkpointfile, p, length(p.Vₖ), converged)
         end
         i += 1
     end

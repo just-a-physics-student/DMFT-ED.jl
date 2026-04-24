@@ -135,10 +135,17 @@ end
 
 @enum ScanMode Fixed_U_increase_T=1 Fixed_U_decrease_T=2 Fixed_T_increase_U=3 Fixed_T_decrease_U=4
 
+"""
+    write_result(filepath::String, 
+    u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
+    dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64, scan_mode::ScanMode)
+
+Write the result of a DMFT calculation. This will OVERWRITE the given file if it already exists!
+"""
 function write_result(filepath::String, 
     u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
     dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64, scan_mode::ScanMode)
-    jldopen(filepath, "w") do file
+    jldopen(filepath, "w+") do file
         file["hubbard-u"] = u
         file["inverse-temperature"] = β
         file["chemical-potential"] = μ
@@ -179,4 +186,34 @@ function read_anderson_parameters(filepath::String, n_bath_sites::Int, return_co
     else
         return AIMParams(ϵ_bath, V_hyb)
     end
+end
+
+"""
+    write_anderson_parameters(filepath::String, params::AIMParams, n_bath_sites::Int)
+
+Write the anderson parameters to file. This operation will OVERWRITE the existing filepath!
+"""
+function write_anderson_parameters(filepath::String, params::AIMParams, n_bath_sites::Int, converged::Bool)
+    checkfile = jldopen(filepath, "w+")
+
+    if "converged" in keys(checkfile)
+        delete!(checkfile, "converged")
+    end
+    checkfile["converged"] = converged
+
+    if "n-bath-sites" in keys(checkfile)
+        delete!(checkfile, "n-bath-sites")
+    end
+    checkfile["n-bath-sites"] = n_bath_sites
+
+    if "bath-energy-levels" in keys(checkfile)
+        delete!(checkfile, "bath-energy-levels")
+    end
+    checkfile["bath-energy-levels"] = params.ϵₖ
+
+    if "hybridization-amplitudes" in keys(checkfile)
+        delete!(checkfile, "hybridization-amplitudes")
+    end
+    checkfile["hybridization-amplitudes"] = params.Vₖ
+    close(checkfile)
 end

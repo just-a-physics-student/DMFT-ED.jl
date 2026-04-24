@@ -4,7 +4,7 @@ using jED: AIMParams, pick_initial_anderson_parameters, read_anderson_parameters
 
 using JLD2: jldopen
 
-# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 4 1.0 1.0 2.0 1.0 "2Dsc-0.25" 60 4 /home/jan/Desktop/rm_me_fork/
+# example call: rm Desktop/rm_me_fork/* ; julia .julia/dev/DMFT-ED.jl/scripts/dmft-ed.jl 4 1.0 1.0 2.0 1.0 "2Dsc-0.25" 60 4 /home/jan/Desktop/rm_me_fork/ --checkpoint
 using ArgParse
 
 function parse_commandline()
@@ -137,13 +137,15 @@ for hubbard_u in hubbard_u_values
             end
             println("Calculation not converged. Will resume from here.")
         end
+
+        checkpointfile = checkpoint ? out_file_path : ""
         
         # run calculation
         println("Start DMFT calc $(n_calc): U = $(hubbard_u) , β = $(inverse_temperature)")
         @time anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
             hubbard_u, chemical_potential, inverse_temperature,
             anderson_parameters, lattice_info, Nν=n_frequencies,
-            abs_conv=convergence_paramater, maxit=max_iterations)
+            abs_conv=convergence_paramater, maxit=max_iterations, checkpointfile=checkpointfile)
         
         # write result
         write_result(out_file_path, hubbard_u, inverse_temperature, chemical_potential, anderson_parameters, partition_sum, GF_imp.parent, Σ_imp.parent,
