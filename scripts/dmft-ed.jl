@@ -12,11 +12,14 @@ function parse_commandline()
 
     @add_arg_table s begin
         "--start_params_file"
-            help = "Path to a file containing Anderson parameters to start the calculation from."
+            help = "Path to a file containing Anderson parameters to start the calculation from. This optional argument should only be used, if the script is executed for the first time. use the resume flag to continue from where it ended."
             arg_type = String
             default = ""
-        "--overwrite_existing"
-            help = "If given, existing result files will be overwritten."
+        "--checkpoint"
+            help = "If given, the result of each DMFT iteration will be saved into the output file. The content of the output file will be overwritten during each iteration."
+            action = :store_true
+        "--resume"
+            help = "Instructs the script to continue from where a previous run was interrupted. Converged output files will remain unchanged."
             action = :store_true
         "scan_mode"
             help = "See documentation of `ScanMode`. 1: Fixed U, increase temperature, 2: Fixed U, decrease temperature, 3: Fixed temperature, increase U, 4: Fixed temperature, decrease U"
@@ -79,7 +82,8 @@ lattice_info        ::String    = parsed_args["lattice_info"]
 bz_points_per_dim   ::Int       = parsed_args["bz_points_per_dim"]
 n_bath_sites        ::Int       = parsed_args["n_bath_sites"]
 out_dir             ::String    = parsed_args["out_dir"]
-overwrite_existing  ::Bool      = parsed_args["overwrite_existing"]
+checkpoint          ::Bool      = parsed_args["checkpoint"]
+resume              ::Bool      = parsed_args["resume"]
 start_params_file   ::String    = parsed_args["start_params_file"]
 
 # define path in (U,T) plane
@@ -122,11 +126,16 @@ for hubbard_u in hubbard_u_values
         out_file_path = joinpath(out_dir, fname)
         if isfile(out_file_path)
             println("Result file already exists: $(out_file_path)")
-            if !overwrite_existing
-                throw(ArgumentError("Stop here! In order to allow overwriting the existing result file, provide cmd argument 10!"))
+            if !resume
+                throw(ArgumentError("Out file already exists! If you try to resume this script from a previous run, use the --resume flag!"))
             end
-            println("Overwriting the result file was explicitly allowed! Resume calculation from last result.")
-            anderson_parameters = read_anderson_parameters(out_file_path, n_bath_sites)
+            anderson_parameters, converged = read_anderson_parameters(out_file_path, n_bath_sites, true)
+            if converged
+                println("Calculation already converged, continue.")
+                n_calc += 1
+                continue
+            end
+            println("Calculation not converged. Will resume from here.")
         end
         
         # run calculation

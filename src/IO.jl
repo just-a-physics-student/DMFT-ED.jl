@@ -160,11 +160,11 @@ function write_result(filepath::String,
 end
 
 """
-    read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParams
+    read_anderson_parameters(filepath::String, n_bath_sites::Int, return_converged::Bool=false)::Union{AIMParams,Tuple{AIMParams,Bool}}
 
 Reads the anderson parameter from a given file and returns them. Throws an DomainError if the number of bath sites does not match the given number of bath sites.
 """
-function read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParams
+function read_anderson_parameters(filepath::String, n_bath_sites::Int, return_converged::Bool=false)::Union{AIMParams,Tuple{AIMParams,Bool}}
     println("Load start parameters from file: $filepath")
     dmft = jldopen(filepath, "r")
         if dmft["n-bath-sites"] ≠ n_bath_sites
@@ -172,6 +172,11 @@ function read_anderson_parameters(filepath::String, n_bath_sites::Int)::AIMParam
         end
         ϵ_bath = dmft["bath-energy-levels"]
         V_hyb  = dmft["hybridization-amplitudes"]
+        converged = return_converged ? dmft["converged"] : false
     close(dmft)
-    return AIMParams(ϵ_bath, V_hyb)
+    if return_converged
+        return AIMParams(ϵ_bath, V_hyb), converged
+    else
+        return AIMParams(ϵ_bath, V_hyb)
+    end
 end
