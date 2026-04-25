@@ -1,9 +1,10 @@
 name = "jED"
 uuid = "97545629-2858-4d6a-8329-5c595e37ec1c"
-version = "1.0.2"
 authors = ["Julian Stobbe", "Jan Frederik Weissler"]
+version = "1.0.2"
 
 [deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 Combinatorics = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Dispersions = "9451dd48-6b2a-4bde-a443-9ec270a37806"
@@ -24,6 +25,7 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [compat]
+ArgParse = "1.2.0"
 JLD2 = "0.6.4"
 julia = "1"
 
