@@ -144,7 +144,7 @@ for hubbard_u in hubbard_u_values
         println("Start DMFT calc $(n_calc): U = $(hubbard_u) , β = $(inverse_temperature)")
         @time anderson_parameters, GF_imp, Σ_imp, partition_sum, E_min, double_occupancy, density, converged, νnGrid = DMFT_Loop(
             hubbard_u, chemical_potential, inverse_temperature,
-            anderson_parameters, lattice_info, Nν=n_frequencies,
+            anderson_parameters, lattice_info, Nk = bz_points_per_dim, Nν=n_frequencies,
             abs_conv=convergence_paramater, maxit=max_iterations, checkpointfile=checkpointfile)
         
         # write result
