@@ -182,7 +182,7 @@ Arguments:
     - Nk::Int=60              : Number of K-Points for GLoc
     - Nν::Int=1000            : Number of Matsubara frequencies
     - α::Float64=0.7          : Mixing (1 -> no mixing)
-    - abs_conv::Float64=1e-8  : Absolute difference of Anderson parameters that if fallen short of leads to termination of the algorithm
+    - abs_conv::Float64=1e-8  : Summed absolute differences of Anderson parameters that if fallen short of leads to termination of the algorithm
     - ϵ_cut::Float64=1e-12    : Terms smaller than this are not considered for the impurity Green's function
     - maxit::Int=20           : Maximum number of DMFT iterations
 
@@ -212,6 +212,7 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
     νnGrid = jED.OffsetVector([1im * (2*n+1)*π/β for n in 0:Nν-1], 0:Nν-1)
 
     converged::Bool = false
+    ϵ_converge::Float64 = 1.0
     E_smallest::Float64 = Inf64
     D::Float64 = Inf64
 
@@ -231,8 +232,9 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
         p_old = deepcopy(p)
         fit_AIM_params!(p, GLoc_i, μ, νnGrid)
         
-        converged = (sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ))) < abs_conv
-        println(" iteration $i: $(sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ)))")
+        ϵ_converge = sum(abs.(p_old.ϵₖ .- p.ϵₖ)) + sum(abs.(p_old.Vₖ .- p.Vₖ))
+        converged = ϵ_converge < abs_conv
+        println(" iteration $i: $(ϵ_converge)")
         println("   ϵₖ = $(lpad.(round.(p.ϵₖ,digits=4),9)...)")
         println("   Vₖ = $(lpad.(round.(p.Vₖ,digits=4),9)...)")
         println("   --> sum(Vₖ²) = $(sum(p.Vₖ .^ 2)) // Z = $Z")
@@ -250,7 +252,7 @@ function DMFT_Loop(U::Float64, μ::Float64, β::Float64, p::AIMParams, KGridStr:
         end
         i += 1
     end
-    return p, GImp_i, ΣImp_i, Z, E_smallest, D, dens, converged, νnGrid
+    return p, GImp_i, ΣImp_i, Z, E_smallest, D, dens, converged, νnGrid, ϵ_converge
 end
 
 

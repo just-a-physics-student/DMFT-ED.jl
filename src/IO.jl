@@ -136,15 +136,16 @@ end
 @enum ScanMode Fixed_U_increase_T=1 Fixed_U_decrease_T=2 Fixed_T_increase_U=3 Fixed_T_decrease_U=4
 
 """
-    write_result(filepath::String, 
-    u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
+    write_result(filepath::String, u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
+    dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64)
+    write_result(filepath::String, u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
     dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64, scan_mode::ScanMode)
 
 Write the result of a DMFT calculation. This will OVERWRITE the given file if it already exists!
 """
-function write_result(filepath::String, 
-    u::Float64, β::Float64, μ::Float64, p::AIMParams, partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
-    dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64, scan_mode::ScanMode)
+function write_result(filepath::String, u::Float64, β::Float64, μ::Float64, p::AIMParams,
+    partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
+    dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64)
     jldopen(filepath, "w+") do file
         file["hubbard-u"] = u
         file["inverse-temperature"] = β
@@ -162,15 +163,32 @@ function write_result(filepath::String,
         file["bz-points-per-dim"] = Nk
         file["convergence-parameter"] = conv_param
         file["converged"] = converged
+    end
+end
+
+function write_result(filepath::String, u::Float64, β::Float64, μ::Float64, p::AIMParams,
+    partition_sum::Float64, G_int::AbstractVector{<:ComplexF64}, Σ_imp::AbstractVector{<:ComplexF64},
+    dens::Float64, double_occ::Float64, E_min::Float64, NBathSites::Int, KGridStr::String, converged::Bool, Nk::Int, conv_param::Float64, scan_mode::ScanMode)
+    write_result(filepath, u, β, μ, p, partition_sum, G_int, Σ_imp, dens, double_occ, E_min, NBathSites, KGridStr, converged, Nk, conv_param)
+    jldopen(filepath, "r+") do file
         file["scan-mode"] = String(Symbol(scan_mode))
     end
 end
 
 """
     read_anderson_parameters(filepath::String, n_bath_sites::Int, return_converged::Bool=false)::Union{AIMParams,Tuple{AIMParams,Bool}}
+    read_anderson_parameters(filepath)::AIMParams
 
-Reads the anderson parameter from a given file and returns them. Throws an DomainError if the number of bath sites does not match the given number of bath sites.
+Reads the anderson parameter from a given file and returns them. If number of baths sites is given, it will throw an DomainError if the number of bath sites in the file does not match the given number of bath sites.
 """
+function read_anderson_parameters(filepath)::AIMParams
+    dmft = jldopen(filepath, "r")
+        ϵ_bath = dmft["bath-energy-levels"]
+        V_hyb  = dmft["hybridization-amplitudes"]
+    close(dmft)
+    return AIMParams(ϵ_bath, V_hyb)
+end
+
 function read_anderson_parameters(filepath::String, n_bath_sites::Int, return_converged::Bool=false)::Union{AIMParams,Tuple{AIMParams,Bool}}
     println("Load start parameters from file: $filepath")
     dmft = jldopen(filepath, "r")
@@ -186,6 +204,53 @@ function read_anderson_parameters(filepath::String, n_bath_sites::Int, return_co
     else
         return AIMParams(ϵ_bath, V_hyb)
     end
+end
+
+function read_preliminary_result(file::String)
+    dmft = jldopen(file, "r")
+        lattice_info       ::String   = dmft["lattice-info"]
+        hubbard_u          ::Float64  = dmft["hubbard-u"]
+        inverse_temperature::Float64  = dmft["inverse-temperature"]
+        chemical_potential ::Float64  = dmft["chemical-potential"]
+    close(dmft)
+    anderson_parameters::AIMParams = read_anderson_parameters(file)
+    return lattice_info, hubbard_u, inverse_temperature, chemical_potential, anderson_parameters
+end
+
+"""
+    read_bz_sampling(filepath::String)::Int
+
+Reads a result file and returns the number of sample points used along a dimension of the first Brillouin zone. 
+"""
+function read_bz_sampling(filepath::String)::Int
+    dmft = jldopen(filepath, "r")
+        bz_points_per_dim::Int = dmft["bz-points-per-dim"]
+    close(dmft)
+    return bz_points_per_dim
+end
+
+"""
+    read_n_frequencies(filepath::String)::Int
+
+Reads a result file and returns the number of positive Matsubara frequencies used. 
+"""
+function read_n_frequencies(filepath::String)::Int
+    dmft = jldopen(filepath, "r")
+    n_frequencies::Int = length(dmft["self-energy-impurity"])
+    close(dmft)
+    return n_frequencies
+end
+
+"""
+    read_convergence_parameter(filepath::String)::Int
+
+Reads a result file and returns the convergency parameter.
+"""
+function read_convergence_parameter(filepath::String)::Real
+    dmft = jldopen(filepath, "r")
+    convergence_parameter::Real = dmft["convergence-parameter"]
+    close(dmft)
+    return convergence_parameter
 end
 
 """
