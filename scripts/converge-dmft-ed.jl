@@ -60,8 +60,7 @@ resume               ::Bool    = parsed_args["resume"]
 !resume && isfile(out_file) && throw(ArgumentError("Out file already exists! If you try to resume this script from a previous run, use the --resume flag!"))
 if (read_convergence_parameter(in_file) < convergence_parameter) && (
     (bz_points_per_dim == 0) || (n_frequencies == 0)) # true if sampling of the brillouin zone or the number of frequencies is altered
-    println("Input calculation already converged. Stop here.")
-    exit()
+    println("Input calculation already converged. Perform an iteration and write result.")
 end
 
 n_frequencies = (n_frequencies == 0) ? read_n_frequencies(in_file) : n_frequencies
